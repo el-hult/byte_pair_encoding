@@ -1,23 +1,35 @@
-use std::{collections::HashMap, fs::read_to_string, iter::zip};
+use std::{collections::HashMap, fs::read_to_string, iter::zip, ops::Index};
 
-type CharPair = (char,char);
-
-fn collect_counts(s:&str)->HashMap<CharPair,u64> {
-    let mut hm = HashMap::new();
-    let left = s.chars();
-    let right = s.chars().skip(1);
-    let pairs = zip(left,right);
-    for pair in pairs {
-        *hm.entry(pair).or_insert(0) += 1;
+fn decode(v:Vec<usize>,mapping_table:Vec<char>) -> String {
+    let mut s = vec![];
+    for token in v{
+        s.push(mapping_table[token]);
     }
-    hm
+    s.into_iter().collect::<String>()
 }
+
+fn encode(s: &str) -> (Vec<usize>,Vec<char>){
+    let mut mapping_table = vec![];
+    let mut v = vec![];
+    for c in s.chars(){
+        let idx =  mapping_table.iter().position(|&a|a==c);
+        match idx {
+            Some(i)=> v.push(i),
+            None=> {
+                let i = mapping_table.len();
+                v.push(i);
+                mapping_table.push(c);
+            }
+        }
+    }
+    (v,mapping_table)
+}
+
 fn main() -> () {
-    let s = read_to_string("input.txt").expect("file is there").to_lowercase();
-    let hm = collect_counts(&s);
-    let (most_common_pair,_) = hm.iter().max_by_key(
-        |(_,&c)| c
-    ).expect("There should be at least one pair");
-    print!("{:?}",most_common_pair);
+    let s = read_to_string("input.txt").expect("file is there");
+    let (v,mapping_table) = encode(&s);
+    let s2 = decode(v, mapping_table);
+    println!("{}",s);
+    println!("{}",s2);
     ()
 }
