@@ -1,14 +1,25 @@
 use std::fs::read_to_string;
 
-fn decode(v:Vec<usize>,mapping_table:Vec<char>) -> String {
+struct TokenizedString { 
+    data: Vec<usize>
+}
+
+impl TokenizedString {
+    fn printme(&self) {
+        // TODO implement changing color between every second token, so that token boundaries becode clear
+        println!("lol");
+    }
+}
+
+fn decode(v:TokenizedString,mapping_table:Vec<char>) -> String {
     let mut s = vec![];
-    for token in v{
+    for token in v.data{
         s.push(mapping_table[token]);
     }
     s.into_iter().collect::<String>()
 }
 
-fn encode(s: &str) -> (Vec<usize>,Vec<char>){
+fn encode(s: &str) -> (TokenizedString,Vec<char>){
     let mut mapping_table = vec![];
     let mut v = vec![];
     for c in s.chars(){
@@ -22,12 +33,13 @@ fn encode(s: &str) -> (Vec<usize>,Vec<char>){
             }
         }
     }
-    (v,mapping_table)
+    (TokenizedString{data:v},mapping_table)
 }
 
 fn main() -> () {
     let s = read_to_string("input.txt").expect("file is there");
     let (v,mapping_table) = encode(&s);
+    v.printme();
     let s2 = decode(v, mapping_table);
     println!("{}",s);
     println!("{}",s2);
