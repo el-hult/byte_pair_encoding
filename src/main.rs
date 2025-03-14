@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::read_to_string, iter::zip, ops::Index};
+use std::fs::read_to_string;
 
 fn decode(v:Vec<usize>,mapping_table:Vec<char>) -> String {
     let mut s = vec![];
