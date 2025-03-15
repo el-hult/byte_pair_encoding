@@ -20,9 +20,8 @@ impl Dictionary {
     fn decode<'a>(&'a self, token: Token) -> &'a Vec<u8> {
         &self.forwards[token]
     }
-    // TODO when working with bytes, we can use some bit manipulation to make this nicer
-    fn add_char_token(&mut self, char: char) -> Token {
-        self.forwards.push(char.to_string().as_bytes().to_vec());
+    fn add_byte_token(&mut self, b: u8) -> Token {
+        self.forwards.push(vec![b]);
         self.forwards.len() - 1
     }
     fn add_pair_rule(&mut self, (fst, snd): (&Token, &Token)) -> Token {
@@ -35,11 +34,10 @@ impl Dictionary {
         self.forwards.push(new_token);
         self.forwards.len() - 1
     }
-    // TODO this is a linear search, but it should be fine for now
-    fn get_token_for_char(&self, c: &char) -> Option<Token> {
+    fn get_token_for_byte(&self, b:u8) -> Option<Token> {
         self.forwards
             .iter()
-            .position(|x| x == &c.to_string().as_bytes().to_vec())
+            .position(|x| x == &vec![b])
     }
 }
 
@@ -81,12 +79,12 @@ fn decode<const COLOR: bool>(v: &TokenizedString, dict: &Dictionary) -> String {
 fn encode(s: &str) -> (TokenizedString, Dictionary) {
     let mut dict = Dictionary { forwards: vec![] };
     let mut v = vec![];
-    for c in s.chars() {
-        let idx = dict.get_token_for_char(&c);
+    for b in s.bytes() {
+        let idx = dict.get_token_for_byte(b);
         match idx {
             Some(i) => v.push(i),
             None => {
-                let i = dict.add_char_token(c);
+                let i = dict.add_byte_token(b);
                 v.push(i);
             }
         }
@@ -96,7 +94,7 @@ fn encode(s: &str) -> (TokenizedString, Dictionary) {
 
 /// Find the most common token pair, replace it in the tokenized string
 /// Return the new tokenized string, and the number of times the newly created token was used
-fn prune_round(v: &TokenizedString, tkn_map: &mut Dictionary) -> (TokenizedString, usize) {
+fn prune_round(v: &TokenizedString, dict: &mut Dictionary) -> (TokenizedString, usize) {
     if v.len() <= 1 {
         return (v.clone(), 0);
     }
@@ -117,9 +115,9 @@ fn prune_round(v: &TokenizedString, tkn_map: &mut Dictionary) -> (TokenizedStrin
         .into_iter()
         .max_by_key(|(_, b)| *b)
         .expect("There should be at least one pair in the iteration before");
-    let new_token_number = tkn_map.add_pair_rule(max_pair);
-    let foo = tkn_map.decode(new_token_number);
-    let foo = std::str::from_utf8(foo).expect("all tokens should be valid utf8");
+    let new_token_number = dict.add_pair_rule(max_pair);
+    let foo = dict.decode(new_token_number);
+    let foo = std::str::from_utf8(foo).unwrap_or( "INVALID UTF8");
     println!("{} ({})", foo, count);
 
     // replace all occurances of the 'max' combination with a new token!
@@ -153,14 +151,14 @@ fn prune_round(v: &TokenizedString, tkn_map: &mut Dictionary) -> (TokenizedStrin
 
 fn main() -> () {
     let s = read_to_string("input.txt").expect("file is there");
-    let (mut v, mut table) = encode(&s);
+    let (mut v, mut dict) = encode(&s);
 
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
     while times_used > 100 {
-        (v, times_used) = prune_round(&v, &mut table);
+        (v, times_used) = prune_round(&v, &mut dict);
     }
-    let s2 = decode::<true>(&v, &table);
+    let s2 = decode::<true>(&v, &dict);
     println!("{}", s2);
     ()
 }
