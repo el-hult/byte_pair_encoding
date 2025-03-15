@@ -1,6 +1,4 @@
 use std::{collections::HashMap, fs::read_to_string};
-const ANSI_RESET: &str = "\x1b[0m";
-const ANSI_YELLOW_TEXT: &str = "\x1b[93m";
 
 type Token = usize;
 type TokenizedString = Vec<Token>;
@@ -15,54 +13,69 @@ type TokenizedString = Vec<Token>;
 // and the reverse mapping table is HashMap<u16,Vec<u8>>
 // a hashmap is probably wasteful, but it is simple to implement and may be fast enough? since the key is really a u32 and all elements in range of u8 are invalid as keys, we could use a vector and just subtract \xFF from the key to get an index? should be super mega fast. but less readable and more code to write?
 struct Dictionary {
-    forwards: Vec<String>
+    forwards: Vec<Vec<u8>>,
 }
 
 impl Dictionary {
-    fn decode(&self, token: Token) -> String {
-        self.forwards[token].clone()
+    fn decode<'a>(&'a self, token: Token) -> &'a Vec<u8> {
+        &self.forwards[token]
     }
     // TODO when working with bytes, we can use some bit manipulation to make this nicer
     fn add_char_token(&mut self, char: char) -> Token {
-        self.forwards.push(char.to_string());
+        self.forwards.push(char.to_string().as_bytes().to_vec());
         self.forwards.len() - 1
     }
-    fn add_pair_rule(&mut self, (fst,snd): (&Token,&Token)) -> Token {
-        let new_token = self.decode(*fst) + &self.decode(*snd);
+    fn add_pair_rule(&mut self, (fst, snd): (&Token, &Token)) -> Token {
+        // for new token maps by concatenating the bytes for the two tokens
+        let new_token = {
+            let mut v = self.forwards[*fst].clone();
+            v.extend(&self.forwards[*snd]);
+            v
+        };
         self.forwards.push(new_token);
         self.forwards.len() - 1
     }
-    // TODO this will be removed when I move to byte level encoding instead of characted level encoding
-    // TODO use a hash map instead to speed up the lookup?
+    // TODO this is a linear search, but it should be fine for now
     fn get_token_for_char(&self, c: &char) -> Option<Token> {
-        self.forwards.iter().position(|x| x == &c.to_string())
+        self.forwards
+            .iter()
+            .position(|x| x == &c.to_string().as_bytes().to_vec())
     }
 }
 
-
-
-// TODO after doing BPE on byte level
-// if a token don't align with a unicode character boundary, we cannot set the color correctly
-// therefore, do two variants in decoding
-// -> decoding a token produces a valid unicode string -- set a color that alternates (white/yellow?)
-// -> decoding a token produces an invalid unicode string -- decode another token and see if the combined byte sequence is valid,
-//   if it is, set the color to red, otherwise add another token in decoding, and try again
-fn decode<const COLOR: bool>(v: &TokenizedString, mapping_table: &Dictionary) -> String {
-    let mut s = vec![];
-    let mut is_red = false;
-    for token in v {
-        if COLOR && is_red {
-            s.push(ANSI_YELLOW_TEXT.to_string());
+fn decode<const COLOR: bool>(v: &TokenizedString, dict: &Dictionary) -> String {
+    let mut output_s = String::new();
+    const RESET: &str = "\x1b[0m";
+    const YELLOW: &str = "\x1b[93m";
+    const RED: &str = "\x1b[91m";
+    let mut curr_color = RESET;
+    let mut it = v.iter();
+    while let Some(token) = it.next() {
+        // try to decode the token
+        let mut decoded = dict.decode(*token).clone();
+        let mut maybe_str = std::str::from_utf8(&decoded);
+        while maybe_str.is_err() {
+            // token did not decode to a valid utf8 sequence, add another decoded token another token
+            let next_token = it
+                .next()
+                .expect("previous did not end on a utf8 boundary, so there must be more tokens");
+            decoded.extend(dict.decode(*next_token));
+            maybe_str = std::str::from_utf8(&decoded);
+            if COLOR {
+                curr_color = RED;
+            }
         }
-        s.push(mapping_table.decode(*token));
-        if COLOR && is_red {
-            s.push(ANSI_RESET.to_string());
-        }
+        let str_to_add = maybe_str.unwrap();
         if COLOR {
-            is_red = !is_red;
+            output_s.push_str(curr_color);
+            curr_color = if curr_color == RESET { YELLOW } else { RESET };
         }
+        output_s.push_str(str_to_add);
     }
-    s.into_iter().collect::<String>()
+    if COLOR {
+        output_s.push_str(RESET);
+    }
+    output_s
 }
 
 fn encode(s: &str) -> (TokenizedString, Dictionary) {
@@ -85,7 +98,7 @@ fn encode(s: &str) -> (TokenizedString, Dictionary) {
 /// Return the new tokenized string, and the number of times the newly created token was used
 fn prune_round(v: &TokenizedString, tkn_map: &mut Dictionary) -> (TokenizedString, usize) {
     if v.len() <= 1 {
-        return (v.clone(),0);
+        return (v.clone(), 0);
     }
 
     // count all token pairs
@@ -106,6 +119,7 @@ fn prune_round(v: &TokenizedString, tkn_map: &mut Dictionary) -> (TokenizedStrin
         .expect("There should be at least one pair in the iteration before");
     let new_token_number = tkn_map.add_pair_rule(max_pair);
     let foo = tkn_map.decode(new_token_number);
+    let foo = std::str::from_utf8(foo).expect("all tokens should be valid utf8");
     println!("{} ({})", foo, count);
 
     // replace all occurances of the 'max' combination with a new token!
@@ -134,20 +148,19 @@ fn prune_round(v: &TokenizedString, tkn_map: &mut Dictionary) -> (TokenizedStrin
         out.push(*fst);
     }
 
-    (out,count)
+    (out, count)
 }
 
 fn main() -> () {
     let s = read_to_string("input.txt").expect("file is there");
     let (mut v, mut table) = encode(&s);
-    
+
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
     while times_used > 100 {
-        (v,times_used) = prune_round(&v, &mut table);
+        (v, times_used) = prune_round(&v, &mut table);
     }
     let s2 = decode::<true>(&v, &table);
     println!("{}", s2);
-    println!("{:?}", table.forwards);
     ()
 }
