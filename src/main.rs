@@ -43,7 +43,7 @@ fn encode(s: &str) -> (TokenizedString, TokenMap) {
 }
 
 /// Find the most common token pair, replace it in the tokenized string
-fn prune_round(v: &TokenizedString, mapping_table: &mut TokenMap) -> TokenizedString {
+fn prune_round(v: &TokenizedString, tkn_map: &mut TokenMap) -> TokenizedString {
     //println!("PRUNE");
     if v.len() <= 1 {
         return v.clone();
@@ -63,11 +63,11 @@ fn prune_round(v: &TokenizedString, mapping_table: &mut TokenMap) -> TokenizedSt
         .into_iter()
         .max_by_key(|(_, b)| *b)
         .expect("There should be at least one pair in the iteration before");
-    let new_token_number = mapping_table.len();
+    let new_token_number = tkn_map.len();
     //println!("{}", new_token_number);
-    let new_token = mapping_table[*max.0].clone() + &mapping_table[*max.1];
-    //println!("{} => {}", new_token, count);
-    mapping_table.push(new_token);
+    let new_token = tkn_map[*max.0].clone() + &tkn_map[*max.1];
+    println!("{} => {}", new_token, count);
+    tkn_map.push(new_token);
 
     // replace all occurances of the 'max' combination with a new token!
     let mut out = vec![];
@@ -100,13 +100,13 @@ fn prune_round(v: &TokenizedString, mapping_table: &mut TokenMap) -> TokenizedSt
 
 fn main() -> () {
     let s = read_to_string("input.txt").expect("file is there");
-    let (mut v, mut mapping_table) = encode(&s);
-    while mapping_table.len() < 200 && v.len() > 1 {
-        v = prune_round(&v, &mut mapping_table);
-        println!("{}", v.len());
+    let (mut v, mut table) = encode(&s);
+    //while mapping_table.len() < 200 && v.len() > 1 {
+    for _ in 0..5 {
+        v = prune_round(&v, &mut table);
     }
-    let s2 = decode::<true>(&v, &mapping_table);
-    println!("{}", s2);
-    //println!("{mapping_table:?}");
+    let s2 = decode::<false>(&v, &table);
+    println!("{}", s2[..200].to_string());
+    println!("{table:?}");
     ()
 }
