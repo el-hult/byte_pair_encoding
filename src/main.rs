@@ -1,10 +1,7 @@
 use std::{collections::HashMap, fs::read_to_string};
 
-// I want token pairs to be a usize, so if I'm on a 64 bit machine, I can have u32 tokens
-#[cfg(not(target_pointer_width = "64"))]
-compile_error!("Your pointers are too small. Try again with a newer computer. Check both the 'Token' type and the 'TokenCounter' struct'");
 
-type Token = u32;
+type Token = u16; // must be smaller than usize, since I upcast from token to usize
 type TokenizedString = Vec<Token>;
 
 
@@ -31,6 +28,9 @@ impl Dictionary {
         b as Token
     }
     fn add_pair_rule(&mut self, (fst, snd): (Token, Token)) -> Token {
+        // make sure there is room to add a new token -- that the storage is large enough
+        assert!(self.decoding_table.len() < Token::MAX as usize);
+
         // for new token maps by concatenating the bytes for the two tokens
         let new_token = {
             let mut v = self.decoding_table[fst as usize].clone();
