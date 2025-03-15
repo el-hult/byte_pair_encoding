@@ -118,6 +118,7 @@ impl TokenPairCounter {
         })
     }
     fn process_string(&mut self, v: &TokenizedString) {
+        self.map.iter_mut().for_each(|(_, v)| *v = 0);
         let mut it = v.iter();
         let mut fst = it.next().unwrap();
         while let Some(snd) = it.next() {
@@ -129,15 +130,13 @@ impl TokenPairCounter {
 
 /// Find the most common token pair, replace it in the tokenized string
 /// Return the new tokenized string, and the number of times the newly created token was used
-fn prune_round(v: &TokenizedString, dict: &mut Dictionary) -> (TokenizedString, usize) {
+fn prune_round(v: &TokenizedString, dict: &mut Dictionary, hm: &mut TokenPairCounter) -> (TokenizedString, usize) {
     if v.len() <= 1 {
         return (v.clone(), 0);
     }
 
     // count all token pairs and add the most common one to the dictionary
-    let mut hm = TokenPairCounter::new();
     hm.process_string(v);
-
     let (max_pair, count) = hm.get_most_common_pair().expect("no pairs found");
     let new_token_number = dict.add_pair_rule(max_pair);
     let foo = dict.decode(new_token_number);
@@ -179,8 +178,9 @@ fn main() -> () {
 
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
+    let mut hm = TokenPairCounter::new();
     while times_used > 100 {
-        (v, times_used) = prune_round(&v, &mut dict);
+        (v, times_used) = prune_round(&v, &mut dict, &mut hm);
     }
     let s2 = decode::<true>(&v, &dict);
     println!("{}", s2);
