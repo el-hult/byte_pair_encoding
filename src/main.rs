@@ -1,17 +1,12 @@
 use std::{collections::HashMap, fs::read_to_string};
 
-type Token = usize;
+// I want token pairs to be a usize, so if I'm on a 64 bit machine, I can have u32 tokens
+#[cfg(not(target_pointer_width = "64"))]
+compile_error!("Your pointers are too small. Try again with a newer computer.");
+
+type Token = u32;
 type TokenizedString = Vec<Token>;
 
-// TODO tokenize on the byte level, not on the unicode character level, to enable BPE encoding unseen unicode characters (but the basic dictionary is that all bytes are kept as they are anyways)
-// the TokenMap should have all reductions from (Token,Token) -> Token
-// so the TokenMap must have that mapping for encoding, and may have a reverse mapping for decoding that goes Token -> Vec<Token> directly, expanding all steps in one go
-// in the first step, use raw bytes casted to u16 as tokens, and then do BPE on that level
-// all the non-byte-tokens are from \x0100 and upwards wo we are guaranteed no ambiguity
-// a token is a u16 = (u8,u8)
-// and so the mapping table is HashMap<(u16,u16),u16> or maybe even HashMap<u32,u16> since we can just shift the u16s into a u32
-// and the reverse mapping table is HashMap<u16,Vec<u8>>
-// a hashmap is probably wasteful, but it is simple to implement and may be fast enough? since the key is really a u32 and all elements in range of u8 are invalid as keys, we could use a vector and just subtract \xFF from the key to get an index? should be super mega fast. but less readable and more code to write?
 struct Dictionary {
     /// mapping from a token to the byte sequence it represents
     decoding_table: Vec<Vec<u8>>,
@@ -28,7 +23,7 @@ impl Dictionary {
     }
 
     fn decode<'a>(&'a self, token: Token) -> &'a Vec<u8> {
-        &self.decoding_table[token]
+        &self.decoding_table[token as usize]
     }
     fn add_byte_token(&mut self, b: u8) -> Token {
         // do nothing -- the byte is already in the dictionary
@@ -37,12 +32,12 @@ impl Dictionary {
     fn add_pair_rule(&mut self, (fst, snd): (&Token, &Token)) -> Token {
         // for new token maps by concatenating the bytes for the two tokens
         let new_token = {
-            let mut v = self.decoding_table[*fst].clone();
-            v.extend(&self.decoding_table[*snd]);
+            let mut v = self.decoding_table[*fst as usize].clone();
+            v.extend(&self.decoding_table[*snd as usize]);
             v
         };
         self.decoding_table.push(new_token);
-        self.decoding_table.len() - 1
+        self.decoding_table.len() as Token - 1
     }
     fn get_token_for_byte(&self, b:u8) -> Option<Token> {
         Some(b as Token) // reserve the first 256 tokens for the raw bytes
