@@ -2,10 +2,11 @@ use std::{collections::HashMap, fs::read_to_string};
 
 // I want token pairs to be a usize, so if I'm on a 64 bit machine, I can have u32 tokens
 #[cfg(not(target_pointer_width = "64"))]
-compile_error!("Your pointers are too small. Try again with a newer computer.");
+compile_error!("Your pointers are too small. Try again with a newer computer. Check both the 'Token' type and the 'TokenCounter' struct'");
 
 type Token = u32;
 type TokenizedString = Vec<Token>;
+
 
 struct Dictionary {
     /// mapping from a token to the byte sequence it represents
@@ -29,11 +30,11 @@ impl Dictionary {
         // do nothing -- the byte is already in the dictionary
         b as Token
     }
-    fn add_pair_rule(&mut self, (fst, snd): (&Token, &Token)) -> Token {
+    fn add_pair_rule(&mut self, (fst, snd): (Token, Token)) -> Token {
         // for new token maps by concatenating the bytes for the two tokens
         let new_token = {
-            let mut v = self.decoding_table[*fst as usize].clone();
-            v.extend(&self.decoding_table[*snd as usize]);
+            let mut v = self.decoding_table[fst as usize].clone();
+            v.extend(&self.decoding_table[snd as usize]);
             v
         };
         self.decoding_table.push(new_token);
@@ -95,6 +96,38 @@ fn encode(s: &str) -> (TokenizedString, Dictionary) {
     (v, dict)
 }
 
+struct TokenPairCounter {
+    // Hard coded that tokens are u32, so I can use a u64 to represent the pair
+    map: HashMap<u64, usize>,
+}
+impl TokenPairCounter {
+    fn new() -> Self {
+        Self {
+            map: HashMap::new(),
+        }
+    }
+    fn add_pair(&mut self, (fst, snd): (&Token, &Token)) {
+        let key = (*fst as u64) << 32 | *snd as u64;
+        *self.map.entry(key).or_insert(0) += 1;
+    }
+    // sort first by count, then by fst, then by snd
+    fn get_most_common_pair(&self) -> Option<((Token,Token), usize)> {
+        self.map.iter().max_by_key(|(_, b)| *b).map(|(k,v)| {
+            let fst = (k >> 32) as Token;
+            let snd = (k & 0xFFFFFFFF) as Token;
+            ((fst, snd), *v)
+        })
+    }
+    fn process_string(&mut self, v: &TokenizedString) {
+        let mut it = v.iter();
+        let mut fst = it.next().unwrap();
+        while let Some(snd) = it.next() {
+            self.add_pair((fst, snd));
+            fst = snd;
+        }
+    }
+}
+
 /// Find the most common token pair, replace it in the tokenized string
 /// Return the new tokenized string, and the number of times the newly created token was used
 fn prune_round(v: &TokenizedString, dict: &mut Dictionary) -> (TokenizedString, usize) {
@@ -102,22 +135,11 @@ fn prune_round(v: &TokenizedString, dict: &mut Dictionary) -> (TokenizedString, 
         return (v.clone(), 0);
     }
 
-    // count all token pairs
-    let mut hm: HashMap<(&Token, &Token), usize> = HashMap::new();
-    let mut token_iterator = v.iter();
-    let mut fst_token = token_iterator.next().unwrap();
-    while let Some(snd_token) = token_iterator.next() {
-        let token_pair = (fst_token, snd_token);
-        *hm.entry(token_pair).or_insert(0) += 1;
-        fst_token = snd_token;
-    }
+    // count all token pairs and add the most common one to the dictionary
+    let mut hm = TokenPairCounter::new();
+    hm.process_string(v);
 
-    // decide what the new token to remove is
-    // TODO make sure this is deterministic, and I don't fall into some trap about iteration order when iterating a hashmap. split ties on the keys!
-    let (max_pair, count) = hm
-        .into_iter()
-        .max_by_key(|(_, b)| *b)
-        .expect("There should be at least one pair in the iteration before");
+    let (max_pair, count) = hm.get_most_common_pair().expect("no pairs found");
     let new_token_number = dict.add_pair_rule(max_pair);
     let foo = dict.decode(new_token_number);
     let foo = std::str::from_utf8(foo).unwrap_or( "INVALID UTF8");
@@ -129,7 +151,7 @@ fn prune_round(v: &TokenizedString, dict: &mut Dictionary) -> (TokenizedString, 
     let mut fst = it.next().unwrap();
     let mut rest_token = true;
     while let Some(snd) = it.next() {
-        let pair = (fst, snd);
+        let pair = (*fst, *snd);
         if pair == max_pair {
             out.push(new_token_number);
             let maybe_fst = it.next();
