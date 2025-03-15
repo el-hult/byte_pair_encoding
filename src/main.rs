@@ -13,31 +13,39 @@ type TokenizedString = Vec<Token>;
 // and the reverse mapping table is HashMap<u16,Vec<u8>>
 // a hashmap is probably wasteful, but it is simple to implement and may be fast enough? since the key is really a u32 and all elements in range of u8 are invalid as keys, we could use a vector and just subtract \xFF from the key to get an index? should be super mega fast. but less readable and more code to write?
 struct Dictionary {
-    forwards: Vec<Vec<u8>>,
+    /// mapping from a token to the byte sequence it represents
+    decoding_table: Vec<Vec<u8>>,
 }
 
 impl Dictionary {
+    fn new() -> Self {
+        // prepopulate the dictionary with all the raw bytes
+        let mut forwards = vec![];
+        for i in 0..256 {
+            forwards.push(vec![i as u8]);
+        }
+        Self { decoding_table: forwards }
+    }
+
     fn decode<'a>(&'a self, token: Token) -> &'a Vec<u8> {
-        &self.forwards[token]
+        &self.decoding_table[token]
     }
     fn add_byte_token(&mut self, b: u8) -> Token {
-        self.forwards.push(vec![b]);
-        self.forwards.len() - 1
+        // do nothing -- the byte is already in the dictionary
+        b as Token
     }
     fn add_pair_rule(&mut self, (fst, snd): (&Token, &Token)) -> Token {
         // for new token maps by concatenating the bytes for the two tokens
         let new_token = {
-            let mut v = self.forwards[*fst].clone();
-            v.extend(&self.forwards[*snd]);
+            let mut v = self.decoding_table[*fst].clone();
+            v.extend(&self.decoding_table[*snd]);
             v
         };
-        self.forwards.push(new_token);
-        self.forwards.len() - 1
+        self.decoding_table.push(new_token);
+        self.decoding_table.len() - 1
     }
     fn get_token_for_byte(&self, b:u8) -> Option<Token> {
-        self.forwards
-            .iter()
-            .position(|x| x == &vec![b])
+        Some(b as Token) // reserve the first 256 tokens for the raw bytes
     }
 }
 
@@ -77,7 +85,7 @@ fn decode<const COLOR: bool>(v: &TokenizedString, dict: &Dictionary) -> String {
 }
 
 fn encode(s: &str) -> (TokenizedString, Dictionary) {
-    let mut dict = Dictionary { forwards: vec![] };
+    let mut dict = Dictionary::new();
     let mut v = vec![];
     for b in s.bytes() {
         let idx = dict.get_token_for_byte(b);
