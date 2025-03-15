@@ -118,7 +118,7 @@ impl TokenPairCounter {
         })
     }
     fn process_string(&mut self, v: &TokenizedString) {
-        self.map.iter_mut().for_each(|(_, v)| *v = 0);
+        self.map.iter_mut().for_each(|(_, v)| *v = 0); // TODO we don't want to invalidate all the work we have done really.
         let mut it = v.iter();
         let mut fst = it.next().unwrap();
         while let Some(snd) = it.next() {
@@ -130,14 +130,16 @@ impl TokenPairCounter {
 
 /// Find the most common token pair, replace it in the tokenized string
 /// Return the new tokenized string, and the number of times the newly created token was used
-fn prune_round(v: &TokenizedString, dict: &mut Dictionary, hm: &mut TokenPairCounter) -> (TokenizedString, usize) {
-    if v.len() <= 1 {
-        return (v.clone(), 0);
+/// PRECONDITION:
+///     tpc has the current pair count for the tkn_str
+/// TODO instead of re-counting every time, just modify the TokenPairCounter to keep track of the total count, as I do the substitutions
+fn prune_round(tkn_str: &TokenizedString, dict: &mut Dictionary, tpc: &mut TokenPairCounter) -> (TokenizedString, usize) {
+    if tkn_str.len() <= 1 {
+        return (tkn_str.clone(), 0);
     }
 
     // count all token pairs and add the most common one to the dictionary
-    hm.process_string(v);
-    let (max_pair, count) = hm.get_most_common_pair().expect("no pairs found");
+    let (max_pair, count) = tpc.get_most_common_pair().expect("no pairs found");
     let new_token_number = dict.add_pair_rule(max_pair);
     let foo = dict.decode(new_token_number);
     let foo = std::str::from_utf8(foo).unwrap_or( "INVALID UTF8");
@@ -145,7 +147,7 @@ fn prune_round(v: &TokenizedString, dict: &mut Dictionary, hm: &mut TokenPairCou
 
     // replace all occurances of the 'max' combination with a new token!
     let mut out = vec![];
-    let mut it = v.iter();
+    let mut it = tkn_str.iter();
     let mut fst = it.next().unwrap();
     let mut rest_token = true;
     while let Some(snd) = it.next() {
@@ -180,6 +182,7 @@ fn main() -> () {
     let mut times_used = 99999;
     let mut hm = TokenPairCounter::new();
     while times_used > 100 {
+        hm.process_string(&v);
         (v, times_used) = prune_round(&v, &mut dict, &mut hm);
     }
     let s2 = decode::<true>(&v, &dict);
