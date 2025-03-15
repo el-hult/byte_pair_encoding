@@ -33,6 +33,7 @@ fn encode(s: &str) -> (TokenizedString, TokenMap) {
         match idx {
             Some(i) => v.push(i),
             None => {
+                println!("{} => {}", c, mapping_table.len());
                 let i = mapping_table.len();
                 v.push(i);
                 mapping_table.push(c.to_string());
@@ -102,11 +103,11 @@ fn main() -> () {
     let s = read_to_string("input.txt").expect("file is there");
     let (mut v, mut table) = encode(&s);
     //while mapping_table.len() < 200 && v.len() > 1 {
-    for _ in 0..5 {
+    for _ in 0..200 {
         v = prune_round(&v, &mut table);
     }
-    let s2 = decode::<false>(&v, &table);
-    println!("{}", s2[..200].to_string());
+    let s2 = decode::<true>(&v, &table);
+    println!("{}", s2);
     println!("{table:?}");
     ()
 }
