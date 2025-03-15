@@ -97,8 +97,7 @@ fn encode(s: &str) -> (TokenizedString, Dictionary) {
 }
 
 struct TokenPairCounter {
-    // Hard coded that tokens are u32, so I can use a u64 to represent the pair
-    map: HashMap<u64, usize>,
+    map: HashMap<(Token,Token), usize>,
 }
 impl TokenPairCounter {
     fn new() -> Self {
@@ -107,14 +106,14 @@ impl TokenPairCounter {
         }
     }
     fn add_pair(&mut self, (fst, snd): (&Token, &Token)) {
-        let key = (*fst as u64) << 32 | *snd as u64;
+        let key = (*fst, *snd);
         *self.map.entry(key).or_insert(0) += 1;
     }
     // sort first by count, then by fst, then by snd
     fn get_most_common_pair(&self) -> Option<((Token,Token), usize)> {
         self.map.iter().max_by_key(|(_, b)| *b).map(|(k,v)| {
-            let fst = (k >> 32) as Token;
-            let snd = (k & 0xFFFFFFFF) as Token;
+            let fst = k.0;
+            let snd = k.1;
             ((fst, snd), *v)
         })
     }
