@@ -201,7 +201,7 @@ fn prune_round(
             tpc.dec_unsafe(&this_pair);
 
             // done?
-            left_to_replace = *tpc.unsafe_get_pair_count(&max_pair);
+            left_to_replace -= 1;
             j += 2; // skip two tokens, since we combined tokens
             continue;
         } else {
