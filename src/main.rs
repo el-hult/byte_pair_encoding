@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fs::read_to_string};
 
-type Token = u16; // must be smaller than usize, since I upcast from token to usize
+type Token = u32; // must be smaller than usize, since I upcast from token to usize
 type TokenizedString = Vec<Token>;
 
 struct Dictionary {
