@@ -1,9 +1,7 @@
 use std::{collections::HashMap, fs::read_to_string};
 
-
 type Token = u16; // must be smaller than usize, since I upcast from token to usize
 type TokenizedString = Vec<Token>;
-
 
 struct Dictionary {
     /// mapping from a token to the byte sequence it represents
@@ -17,10 +15,12 @@ impl Dictionary {
         for i in 0..256 {
             forwards.push(vec![i as u8]);
         }
-        Self { decoding_table: forwards }
+        Self {
+            decoding_table: forwards,
+        }
     }
 
-    fn decode<'a>(&'a self, token: Token) -> &'a Vec<u8> {
+    fn decode(&self, token: Token) -> &Vec<u8> {
         &self.decoding_table[token as usize]
     }
     fn add_byte_token(&mut self, b: u8) -> Token {
@@ -40,7 +40,7 @@ impl Dictionary {
         self.decoding_table.push(new_token);
         self.decoding_table.len() as Token - 1
     }
-    fn get_token_for_byte(&self, b:u8) -> Option<Token> {
+    fn get_token_for_byte(&self, b: u8) -> Option<Token> {
         Some(b as Token) // reserve the first 256 tokens for the raw bytes
     }
 }
@@ -97,34 +97,42 @@ fn encode(s: &str) -> (TokenizedString, Dictionary) {
 }
 
 struct TokenPairCounter {
-    map: HashMap<(Token,Token), usize>,
+    map: HashMap<(Token, Token), usize>,
 }
 impl TokenPairCounter {
-    fn new() -> Self {
-        Self {
+    fn new(v: &TokenizedString) -> Self {
+        let mut it = v.iter();
+        let mut fst = it.next().unwrap();
+        let mut s = Self {
             map: HashMap::new(),
+        };
+        for snd in it {
+            s.inc((*fst, *snd));
+            fst = snd;
         }
+        s
     }
-    fn add_pair(&mut self, (fst, snd): (&Token, &Token)) {
-        let key = (*fst, *snd);
+    fn inc(&mut self, key: (Token, Token)) {
+        //eprintln!("+1 on {:?}",key);
         *self.map.entry(key).or_insert(0) += 1;
     }
     // sort first by count, then by fst, then by snd
-    fn get_most_common_pair(&self) -> Option<((Token,Token), usize)> {
-        self.map.iter().max_by_key(|(_, b)| *b).map(|(k,v)| {
+    fn get_most_common_pair(&self) -> Option<((Token, Token), usize)> {
+        self.map.iter().max_by_key(|(_, b)| *b).map(|(k, v)| {
             let fst = k.0;
             let snd = k.1;
             ((fst, snd), *v)
         })
     }
-    fn process_string(&mut self, v: &TokenizedString) {
-        self.map.iter_mut().for_each(|(_, v)| *v = 0); // TODO we don't want to invalidate all the work we have done really.
-        let mut it = v.iter();
-        let mut fst = it.next().unwrap();
-        while let Some(snd) = it.next() {
-            self.add_pair((fst, snd));
-            fst = snd;
-        }
+
+    /// PRECONDITION: the pair must be present
+    fn dec_unsafe(&mut self, key: &(Token, Token)) {
+        //eprintln!("-1 on {:?}",key);
+        *self.map.get_mut(key).unwrap() -= 1;
+    }
+
+    fn unsafe_get_pair_count(&self, key: &(Token, Token)) -> &usize {
+        self.map.get(key).unwrap()
     }
 }
 
@@ -133,59 +141,146 @@ impl TokenPairCounter {
 /// PRECONDITION:
 ///     tpc has the current pair count for the tkn_str
 /// TODO instead of re-counting every time, just modify the TokenPairCounter to keep track of the total count, as I do the substitutions
-fn prune_round(tkn_str: &TokenizedString, dict: &mut Dictionary, tpc: &mut TokenPairCounter) -> (TokenizedString, usize) {
-    if tkn_str.len() <= 1 {
+fn prune_round(
+    tkn_str: &TokenizedString,
+    dict: &mut Dictionary,
+    tpc: &mut TokenPairCounter,
+) -> (TokenizedString, usize) {
+    //eprintln!("prune_round");
+    assert!(!tkn_str.is_empty());
+    if tkn_str.len() == 1 {
         return (tkn_str.clone(), 0);
     }
 
-    // count all token pairs and add the most common one to the dictionary
+    // okay, we have at least two tokens.
+    // which token pair should we replace?
+    // finde out which token pair is most common.
+    // then add the most common one to the dictionary
     let (max_pair, count) = tpc.get_most_common_pair().expect("no pairs found");
-    let new_token_number = dict.add_pair_rule(max_pair);
-    let foo = dict.decode(new_token_number);
-    let foo = std::str::from_utf8(foo).unwrap_or( "INVALID UTF8");
-    println!("{} ({})", foo, count);
+    let new_token = dict.add_pair_rule(max_pair);
+    let decoded_token = dict.decode(new_token);
+    let decoded_token_as_string = std::str::from_utf8(decoded_token).unwrap_or("INVALID UTF8");
+    println!("{} => {}", decoded_token_as_string, count);
 
     // replace all occurances of the 'max' combination with a new token!
     let mut out = vec![];
-    let mut it = tkn_str.iter();
-    let mut fst = it.next().unwrap();
-    let mut rest_token = true;
-    while let Some(snd) = it.next() {
-        let pair = (*fst, *snd);
-        if pair == max_pair {
-            out.push(new_token_number);
-            let maybe_fst = it.next();
-            match maybe_fst {
-                None => {
-                    rest_token = false;
-                    break;
-                }
-                Some(q) => fst = q,
-            }
-        } else {
-            out.push(*fst);
-            fst = snd;
+    let mut j = 0;
+    let mut left_to_replace = *tpc.unsafe_get_pair_count(&max_pair);
+    assert_eq!(left_to_replace, count);
+    while j < tkn_str.len() {
+        let this_tkn = tkn_str[j];
+        //eprintln!("This token={}",this_tkn);
+
+        // try to take next token. if there is some
+        let next_tkn = tkn_str.get(j + 1);
+        if next_tkn.is_none() {
+            out.push(this_tkn);
+            break;
         }
-    }
-    if rest_token {
-        out.push(*fst);
+        let next_tkn = *next_tkn.unwrap();
+
+        // should we do a replacement?
+        let this_pair = (this_tkn, next_tkn);
+        if (left_to_replace > 0) && (this_pair == max_pair) {
+            // with no replacement, I would have a count (pre_tkn,this_tkn), but replacement changes it into (pre_tkn,new_token)
+            if let Some(&pre_tkn) = out.last() {
+                let pair_to_remove = (pre_tkn, this_tkn);
+                tpc.dec_unsafe(&pair_to_remove);
+                tpc.inc((pre_tkn, new_token));
+            }
+
+            // same, but at the end of the replacement
+            if let Some(&post_tkn) = tkn_str.get(j + 2) {
+                let pair_to_add = (new_token, post_tkn);
+                tpc.dec_unsafe(&(next_tkn, post_tkn));
+                tpc.inc(pair_to_add);
+            }
+
+            // push the new token, remvoe the deleted pair, and see if we are done
+            out.push(new_token);
+            tpc.dec_unsafe(&this_pair);
+
+            // done?
+            left_to_replace = *tpc.unsafe_get_pair_count(&max_pair);
+            j += 2; // skip two tokens, since we combined tokens
+            continue;
+        } else {
+            // no replacement
+            //eprintln!("(j={}) no sub",j);
+            out.push(this_tkn);
+            j += 1;
+            continue;
+        }
     }
 
     (out, count)
 }
 
-fn main() -> () {
+fn main() {
     let s = read_to_string("input.txt").expect("file is there");
     let (mut v, mut dict) = encode(&s);
 
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
-    let mut hm = TokenPairCounter::new();
-    while times_used > 100 {
-        hm.process_string(&v);
+    let mut hm = TokenPairCounter::new(&v);
+    while times_used > 10 {
         (v, times_used) = prune_round(&v, &mut dict, &mut hm);
     }
     let s2 = decode::<true>(&v, &dict);
     println!("{}", s2);
-    ()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn process_not() {
+        let s = "la la".to_owned();
+        let (v, dict) = encode(&s);
+        let s2 = decode::<false>(&v, &dict);
+        assert_eq!(s, s2)
+    }
+    #[test]
+    fn process_once() {
+        let s = "la la".to_owned();
+        let (mut v, mut dict) = encode(&s);
+        let mut hm = TokenPairCounter::new(&v);
+        (v, _) = prune_round(&v, &mut dict, &mut hm);
+        let s2 = decode::<false>(&v, &dict);
+        assert_eq!(s, s2)
+    }
+    #[test]
+    fn process_twice() {
+        let s = "la la".to_owned();
+        let (mut v, mut dict) = encode(&s);
+        let mut hm = TokenPairCounter::new(&v);
+        (v, _) = prune_round(&v, &mut dict, &mut hm);
+        (v, _) = prune_round(&v, &mut dict, &mut hm);
+        let s2 = decode::<false>(&v, &dict);
+        assert_eq!(s, s2)
+    }
+
+    fn check_tpc_handling(s: String) {
+        let (v, mut dict) = encode(&s);
+        let mut hm = TokenPairCounter::new(&v);
+        let (v2, _) = prune_round(&v, &mut dict, &mut hm);
+        let mut hm2 = TokenPairCounter::new(&v2);
+        //eprintln!("{:?}",v2);
+        hm.map.retain(|_, v| *v > 0);
+        hm2.map.retain(|_, v| *v > 0);
+        assert_eq!(hm.map, hm2.map);
+    }
+
+    #[test]
+    fn test_update_is_correct_1() {
+        check_tpc_handling("abab".to_owned());
+    }
+    #[test]
+    fn test_update_is_correct_2() {
+        check_tpc_handling("ab ab".to_owned());
+    }
+    #[test]
+    fn test_update_is_correct_3() {
+        check_tpc_handling("ababc".to_owned());
+    }
 }
