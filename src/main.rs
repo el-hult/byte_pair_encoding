@@ -3,7 +3,7 @@ use std::{collections::HashMap, fs::read_to_string};
 type Token = u32; // must be smaller than usize, since I upcast from token to usize
 type TokenizedString = Vec<Token>;
 
-struct Dictionary {
+struct Tokenizer {
     /// mapping from a token to the byte sequence it represents
     /// N.B. it decodes to bytes, since a token MAY NOT be at a utf8 boundary
     decoding_table: Vec<Vec<u8>>,
@@ -11,7 +11,7 @@ struct Dictionary {
     encoding_table: HashMap<(Token, Token), Token>,
 }
 
-impl Dictionary {
+impl Tokenizer {
     fn new() -> Self {
         // prepopulate the dictionary with all the raw bytes
         let mut forwards = vec![];
@@ -24,7 +24,7 @@ impl Dictionary {
         }
     }
 
-    fn decode(&self, token: Token) -> &Vec<u8> {
+    fn decode_token(&self, token: Token) -> &Vec<u8> {
         &self.decoding_table[token as usize]
     }
     fn add_pair_rule(&mut self, (fst, snd): (Token, Token)) -> Token {
@@ -42,41 +42,66 @@ impl Dictionary {
         self.encoding_table.insert((fst, snd), new_token_num);
         new_token_num
     }
-}
 
-fn decode<const COLOR: bool>(v: &TokenizedString, dict: &Dictionary) -> String {
-    let mut output_s = String::new();
-    const RESET: &str = "\x1b[0m";
-    const YELLOW: &str = "\x1b[93m";
-    const RED: &str = "\x1b[91m";
-    let mut curr_color = RESET;
-    let mut it = v.iter();
-    while let Some(token) = it.next() {
-        // try to decode the token
-        let mut decoded = dict.decode(*token).clone();
-        let mut maybe_str = std::str::from_utf8(&decoded);
-        while maybe_str.is_err() {
-            // token did not decode to a valid utf8 sequence, add another decoded token another token
-            let next_token = it
-                .next()
-                .expect("previous did not end on a utf8 boundary, so there must be more tokens");
-            decoded.extend(dict.decode(*next_token));
-            maybe_str = std::str::from_utf8(&decoded);
-            if COLOR {
-                curr_color = RED;
+    /// Encode string into tokens
+    fn encode(&self, v: &str) -> Vec<Token> {
+        let mut tkn_it = v.bytes().map(|b| b as Token);
+        let mut out = Vec::new();
+        assert!(v.len() > 0);
+        out.push(tkn_it.next().unwrap()); // there is at least one token in the output buffer
+        while let Some(mut tkn) = tkn_it.next() {
+            while let Some(&last_tkn) = out.last() {
+                match self.encoding_table.get(&(last_tkn, tkn)) {
+                    Some(&new_tkn) => {
+                        // replace the `last_tkn` with the new token
+                        tkn = new_tkn;
+                        out.pop();
+                        continue;
+                    }
+                    None => {
+                        break;
+                    }
+                }
             }
+            out.push(tkn);
         }
-        let str_to_add = maybe_str.unwrap();
+        out
+    }
+
+    fn decode<const COLOR: bool>(&self, v: &TokenizedString) -> String {
+        let mut output_s = String::new();
+        const RESET: &str = "\x1b[0m";
+        const YELLOW: &str = "\x1b[93m";
+        const RED: &str = "\x1b[91m";
+        let mut curr_color = RESET;
+        let mut it = v.iter();
+        while let Some(token) = it.next() {
+            // try to decode the token
+            let mut decoded = self.decode_token(*token).clone();
+            let mut maybe_str = std::str::from_utf8(&decoded);
+            while maybe_str.is_err() {
+                // token did not decode to a valid utf8 sequence, add another decoded token another token
+                let next_token = it.next().expect(
+                    "previous did not end on a utf8 boundary, so there must be more tokens",
+                );
+                decoded.extend(self.decode_token(*next_token));
+                maybe_str = std::str::from_utf8(&decoded);
+                if COLOR {
+                    curr_color = RED;
+                }
+            }
+            let str_to_add = maybe_str.unwrap();
+            if COLOR {
+                output_s.push_str(curr_color);
+                curr_color = if curr_color == RESET { YELLOW } else { RESET };
+            }
+            output_s.push_str(str_to_add);
+        }
         if COLOR {
-            output_s.push_str(curr_color);
-            curr_color = if curr_color == RESET { YELLOW } else { RESET };
+            output_s.push_str(RESET);
         }
-        output_s.push_str(str_to_add);
+        output_s
     }
-    if COLOR {
-        output_s.push_str(RESET);
-    }
-    output_s
 }
 
 struct TokenPairCounter {
@@ -124,9 +149,9 @@ impl TokenPairCounter {
 /// Return the new tokenized string, and the number of times the newly created token was used
 /// PRECONDITION:
 ///     tpc has the current pair count for the tkn_str
-fn prune_round(
+fn prune_round<const DEBUG: bool>(
     tkn_str: &TokenizedString,
-    dict: &mut Dictionary,
+    dict: &mut Tokenizer,
     tpc: &mut TokenPairCounter,
 ) -> (TokenizedString, usize) {
     //eprintln!("prune_round");
@@ -141,12 +166,13 @@ fn prune_round(
     // then add the most common one to the dictionary
     let (max_pair, count) = tpc.get_most_common_pair().expect("no pairs found");
     let new_token = dict.add_pair_rule(max_pair);
-    let decoded_token = dict.decode(new_token);
-    let decoded_token_as_string = std::str::from_utf8(decoded_token).unwrap_or("INVALID UTF8");
-    println!("{} => {}", decoded_token_as_string, count);
-
+    if DEBUG {
+        let decoded_token = dict.decode_token(new_token);
+        let decoded_token_as_string = std::str::from_utf8(decoded_token).unwrap_or("INVALID UTF8");
+        println!("{} => {}", decoded_token_as_string, count);
+    }
     // replace all occurances of the 'max' combination with a new token!
-    let mut out = vec![];
+    let mut out = Vec::with_capacity(tkn_str.len());
     let mut j = 0;
     let mut left_to_replace = *tpc.get_pair_count_unsafe(&max_pair);
     assert_eq!(left_to_replace, count);
@@ -201,65 +227,66 @@ fn prune_round(
 
 fn main() {
     let s = read_to_string("input.txt").expect("file is there");
-    let mut v= s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
-    let mut dict =  Dictionary::new();
+    let mut v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
+    let mut dict = Tokenizer::new();
 
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
     let mut hm = TokenPairCounter::new(&v);
-    while times_used > 10 {
-        (v, times_used) = prune_round(&v, &mut dict, &mut hm);
+    while times_used > 100 {
+        (v, times_used) = prune_round::<false>(&v, &mut dict, &mut hm);
     }
-    let s2 = decode::<true>(&v, &dict);
+    let s2 = dict.decode::<true>(&v);
     println!("{}", s2);
+
+    let test_s = read_to_string("input2.txt").expect("Ddid not find second file");
+    let test_s2 = dict.decode::<true>(&dict.encode(&test_s));
+    println!("{}", test_s2);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn encode(s: &str) -> (TokenizedString, Dictionary) {
+    fn init(s: &str) -> (TokenizedString, Tokenizer, TokenPairCounter) {
         let v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
-        let dict = Dictionary::new();
-        (v, dict)
+        let dict = Tokenizer::new();
+        let tpc = TokenPairCounter::new(&v);
+        (v, dict, tpc)
     }
 
     #[test]
     fn process_not() {
         let s = "la la".to_owned();
-        let (v, dict) = encode(&s);
-        let s2 = decode::<false>(&v, &dict);
+        let (v, dict, _) = init(&s);
+        let s2 = dict.decode::<false>(&v);
         assert_eq!(s, s2)
     }
     #[test]
     fn process_once() {
         let s = "la la".to_owned();
-        let (mut v, mut dict) = encode(&s);
-        let mut hm = TokenPairCounter::new(&v);
-        (v, _) = prune_round(&v, &mut dict, &mut hm);
-        let s2 = decode::<false>(&v, &dict);
+        let (mut v, mut dict, mut tpc) = init(&s);
+        (v, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
+        let s2 = dict.decode::<false>(&v);
         assert_eq!(s, s2)
     }
     #[test]
     fn process_twice() {
         let s = "la la".to_owned();
-        let (mut v, mut dict) = encode(&s);
-        let mut hm = TokenPairCounter::new(&v);
-        (v, _) = prune_round(&v, &mut dict, &mut hm);
-        (v, _) = prune_round(&v, &mut dict, &mut hm);
-        let s2 = decode::<false>(&v, &dict);
+        let (mut v, mut dict, mut tpc) = init(&s);
+        (v, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
+        (v, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
+        let s2 = dict.decode::<false>(&v);
         assert_eq!(s, s2)
     }
 
     fn check_tpc_handling(s: String) {
-        let (v, mut dict) = encode(&s);
-        let mut hm = TokenPairCounter::new(&v);
-        let (v2, _) = prune_round(&v, &mut dict, &mut hm);
-        let mut hm2 = TokenPairCounter::new(&v2);
-        //eprintln!("{:?}",v2);
-        hm.map.retain(|_, v| *v > 0);
-        hm2.map.retain(|_, v| *v > 0);
-        assert_eq!(hm.map, hm2.map);
+        let (v, mut dict, mut tpc) = init(&s);
+        let (v2, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
+        let mut tpc2 = TokenPairCounter::new(&v2);
+        tpc.map.retain(|_, v| *v > 0);
+        tpc2.map.retain(|_, v| *v > 0);
+        assert_eq!(tpc.map, tpc2.map);
     }
 
     #[test]
@@ -273,5 +300,20 @@ mod tests {
     #[test]
     fn test_update_is_correct_3() {
         check_tpc_handling("ababc".to_owned());
+    }
+
+    /// Can train a tokenizer on one string, and then round trip another string with compression
+    #[test]
+    fn test_transfer() {
+        let s1 = "abab".to_owned();
+        let s2 = "ab ab".to_owned();
+        let (v, mut dict, mut tpc) = init(&s1);
+        let (_, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
+        let v2 = dict.encode(&s2);
+        let num_bytes = s2.bytes().count();
+        let num_tokens = v2.len();
+        assert!(num_tokens < num_bytes);
+        let s2_decoded = dict.decode::<false>(&v2);
+        assert_eq!(s2, s2_decoded);
     }
 }
