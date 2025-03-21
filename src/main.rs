@@ -23,10 +23,6 @@ impl Dictionary {
     fn decode(&self, token: Token) -> &Vec<u8> {
         &self.decoding_table[token as usize]
     }
-    fn add_byte_token(&mut self, b: u8) -> Token {
-        // do nothing -- the byte is already in the dictionary
-        b as Token
-    }
     fn add_pair_rule(&mut self, (fst, snd): (Token, Token)) -> Token {
         // make sure there is room to add a new token -- that the storage is large enough
         assert!(self.decoding_table.len() < Token::MAX as usize);
@@ -39,9 +35,6 @@ impl Dictionary {
         };
         self.decoding_table.push(new_token);
         self.decoding_table.len() as Token - 1
-    }
-    fn get_token_for_byte(&self, b: u8) -> Option<Token> {
-        Some(b as Token) // reserve the first 256 tokens for the raw bytes
     }
 }
 
@@ -78,22 +71,6 @@ fn decode<const COLOR: bool>(v: &TokenizedString, dict: &Dictionary) -> String {
         output_s.push_str(RESET);
     }
     output_s
-}
-
-fn encode(s: &str) -> (TokenizedString, Dictionary) {
-    let mut dict = Dictionary::new();
-    let mut v = vec![];
-    for b in s.bytes() {
-        let idx = dict.get_token_for_byte(b);
-        match idx {
-            Some(i) => v.push(i),
-            None => {
-                let i = dict.add_byte_token(b);
-                v.push(i);
-            }
-        }
-    }
-    (v, dict)
 }
 
 struct TokenPairCounter {
@@ -218,7 +195,8 @@ fn prune_round(
 
 fn main() {
     let s = read_to_string("input.txt").expect("file is there");
-    let (mut v, mut dict) = encode(&s);
+    let mut v= s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
+    let mut dict =  Dictionary::new();
 
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
@@ -233,6 +211,13 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn encode(s: &str) -> (TokenizedString, Dictionary) {
+        let v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
+        let dict = Dictionary::new();
+        (v, dict)
+    }
+
     #[test]
     fn process_not() {
         let s = "la la".to_owned();
