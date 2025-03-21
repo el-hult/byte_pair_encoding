@@ -5,7 +5,10 @@ type TokenizedString = Vec<Token>;
 
 struct Dictionary {
     /// mapping from a token to the byte sequence it represents
+    /// N.B. it decodes to bytes, since a token MAY NOT be at a utf8 boundary
     decoding_table: Vec<Vec<u8>>,
+    /// mapping from token pairs to tokens
+    encoding_table: HashMap<(Token, Token), Token>,
 }
 
 impl Dictionary {
@@ -17,6 +20,7 @@ impl Dictionary {
         }
         Self {
             decoding_table: forwards,
+            encoding_table: HashMap::new(),
         }
     }
 
@@ -34,7 +38,9 @@ impl Dictionary {
             v
         };
         self.decoding_table.push(new_token);
-        self.decoding_table.len() as Token - 1
+        let new_token_num = self.decoding_table.len() as Token - 1;
+        self.encoding_table.insert((fst, snd), new_token_num);
+        new_token_num
     }
 }
 
@@ -108,7 +114,8 @@ impl TokenPairCounter {
         *self.map.get_mut(key).unwrap() -= 1;
     }
 
-    fn unsafe_get_pair_count(&self, key: &(Token, Token)) -> &usize {
+    /// PRECONDITION: the pair must be present
+    fn get_pair_count_unsafe(&self, key: &(Token, Token)) -> &usize {
         self.map.get(key).unwrap()
     }
 }
@@ -117,7 +124,6 @@ impl TokenPairCounter {
 /// Return the new tokenized string, and the number of times the newly created token was used
 /// PRECONDITION:
 ///     tpc has the current pair count for the tkn_str
-/// TODO instead of re-counting every time, just modify the TokenPairCounter to keep track of the total count, as I do the substitutions
 fn prune_round(
     tkn_str: &TokenizedString,
     dict: &mut Dictionary,
@@ -142,7 +148,7 @@ fn prune_round(
     // replace all occurances of the 'max' combination with a new token!
     let mut out = vec![];
     let mut j = 0;
-    let mut left_to_replace = *tpc.unsafe_get_pair_count(&max_pair);
+    let mut left_to_replace = *tpc.get_pair_count_unsafe(&max_pair);
     assert_eq!(left_to_replace, count);
     while j < tkn_str.len() {
         let this_tkn = tkn_str[j];
