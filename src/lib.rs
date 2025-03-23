@@ -304,14 +304,9 @@ fn prune_round<const DEBUG: bool>(
 
 /// Helper to read the next 4 bytes from an iterator and return a u32
 fn take_u32_le(it: &mut std::slice::Iter<u8>) -> u32 {
-    let bytes: [u8; 4] = it
-        .by_ref()
-        .take(4)
-        .cloned()
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-    u32::from_le_bytes(bytes)
+    let mut bs = [0u8; 4];
+    bs.copy_from_slice(&it.by_ref().take(4).cloned().collect::<Vec<u8>>());
+    u32::from_le_bytes(bs)
 }
 
 #[cfg(test)]
