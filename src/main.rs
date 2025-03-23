@@ -5,7 +5,6 @@ type TokenizedString = Vec<Token>;
 
 struct Tokenizer {
     /// mapping from a token to the byte sequence it represents
-    /// N.B. it decodes to bytes, since a token MAY NOT be at a utf8 boundary
     decoding_table: Vec<Vec<u8>>,
     /// mapping from token pairs to tokens
     encoding_table: HashMap<(Token, Token), Token>,
