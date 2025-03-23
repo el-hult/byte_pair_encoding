@@ -7,8 +7,8 @@ type TokenizedString = Vec<Token>;
 pub struct BytePairEncodingTokenizer {
     /// mapping from a token to the byte sequence it represents
     decoding_table: Vec<Vec<u8>>,
-    /// mapping from token pairs to tokens
-    encoding_table: HashMap<(Token, Token), Token>,
+    /// ordered collection of token pairs and their corresponding tokens
+    encoding_table: Vec<((Token, Token), Token)>,
 }
 
 impl BytePairEncodingTokenizer {
@@ -20,7 +20,7 @@ impl BytePairEncodingTokenizer {
         }
         Self {
             decoding_table: forwards,
-            encoding_table: HashMap::new(),
+            encoding_table: Vec::new(),
         }
     }
 
@@ -43,33 +43,33 @@ impl BytePairEncodingTokenizer {
         };
         self.decoding_table.push(new_token);
         let new_token_num = self.decoding_table.len() as Token - 1;
-        self.encoding_table.insert((fst, snd), new_token_num);
+        self.encoding_table.push(((fst, snd), new_token_num));
         new_token_num
     }
 
     /// Encode string into tokens
+    /// First cast to bytes, then iteratively use the encoding table to 
+    /// replace token pairs with new tokens
     pub fn encode(&self, v: &str) -> Vec<Token> {
-        let mut tkn_it = v.bytes().map(|b| b as Token);
-        let mut out = Vec::new();
-        assert!(v.len() > 0);
-        out.push(tkn_it.next().unwrap()); // there is at least one token in the output buffer
-        while let Some(mut tkn) = tkn_it.next() {
-            while let Some(&last_tkn) = out.last() {
-                match self.encoding_table.get(&(last_tkn, tkn)) {
-                    Some(&new_tkn) => {
-                        // replace the `last_tkn` with the new token
-                        tkn = new_tkn;
-                        out.pop();
-                        continue;
-                    }
-                    None => {
-                        break;
-                    }
+        let mut v1 = v.bytes().map(|b| b.into()).collect::<Vec<Token>>();
+        let mut v2 = Vec::with_capacity(v1.len());
+
+        for ((fst, snd), new_tkn) in &self.encoding_table {
+            let mut i = 0;
+            while i < v1.len() {
+                if i + 1 < v1.len() && v1[i] == *fst && v1[i + 1] == *snd {
+                    v2.push(*new_tkn);
+                    i += 2;
+                } else {
+                    v2.push(v1[i]);
+                    i += 1;
                 }
             }
-            out.push(tkn);
+
+            std::mem::swap(&mut v1, &mut v2);
+            v2.clear();
         }
-        out
+        v1
     }
 
     pub fn decode<const COLOR: bool>(&self, v: &TokenizedString) -> String {
@@ -147,12 +147,12 @@ impl BytePairEncodingTokenizer {
         }
 
         let num_pairs = take_u32_le(&mut it) as usize;
-        let mut encoding_table = HashMap::with_capacity(num_pairs);
+        let mut encoding_table = Vec::with_capacity(num_pairs);
         for _ in 0..num_pairs {
             let fst = take_u32_le(&mut it);
             let snd = take_u32_le(&mut it);
             let new_tkn = take_u32_le(&mut it);
-            encoding_table.insert((fst, snd), new_tkn);
+            encoding_table.push(((fst, snd), new_tkn));
         }
 
         Self {
@@ -169,7 +169,7 @@ impl BytePairEncodingTokenizer {
         let mut tpc = TokenPairCounter::new(&v);
 
         while times_used > min_usage_count {
-            (v, times_used) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+            (v, times_used) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
         }
 
         (tokenizer, v)
@@ -181,6 +181,7 @@ struct TokenPairCounter {
 }
 impl TokenPairCounter {
     fn new(v: &TokenizedString) -> Self {
+        assert!(v.len() > 1);
         let mut it = v.iter();
         let mut fst = it.next().unwrap();
         let mut s = Self {
@@ -226,7 +227,7 @@ impl TokenPairCounter {
 /// Return the new tokenized string, and the number of times the newly created token was used
 /// PRECONDITION:
 ///     tpc has the current pair count for the tkn_str
-fn prune_round<const DEBUG: bool>(
+fn train_step<const DEBUG: bool>(
     tkn_str: &TokenizedString,
     tokenizer: &mut BytePairEncodingTokenizer,
     tpc: &mut TokenPairCounter,
@@ -331,7 +332,7 @@ mod tests {
     fn process_once() {
         let s = "la la".to_owned();
         let (mut v, mut tokenizer, mut tpc) = init(&s);
-        (v, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        (v, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
         let s2 = tokenizer.decode::<false>(&v);
         assert_eq!(s, s2)
     }
@@ -339,15 +340,15 @@ mod tests {
     fn process_twice() {
         let s = "la la".to_owned();
         let (mut v, mut tokenizer, mut tpc) = init(&s);
-        (v, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
-        (v, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        (v, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
+        (v, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
         let s2 = tokenizer.decode::<false>(&v);
         assert_eq!(s, s2)
     }
 
     fn check_tpc_handling(s: String) {
         let (v, mut tokenizer, mut tpc) = init(&s);
-        let (v2, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        let (v2, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
         let mut tpc2 = TokenPairCounter::new(&v2);
         tpc.map.retain(|_, v| *v > 0);
         tpc2.map.retain(|_, v| *v > 0);
@@ -367,19 +368,46 @@ mod tests {
         check_tpc_handling("ababc".to_owned());
     }
 
+        /// Can train a tokenizer on one string, and then round trip another string with compression
+        #[test]
+        fn test_troundtrip() {
+            let s1 = "abab".to_owned();
+    
+            // Train a tokenizer on s1
+            let (tokenizer,train_tokenized) = BytePairEncodingTokenizer::from_corpus(&s1, 2);
+            let train_roundtrip = tokenizer.decode::<false>(&train_tokenized);
+            assert_eq!(s1, train_roundtrip);
+
+            // Did it actually compress? Fewer tokens than bytes?
+            assert!(train_tokenized.len() < s1.bytes().len());
+        }
+
     /// Can train a tokenizer on one string, and then round trip another string with compression
     #[test]
-    fn test_transfer() {
+    fn test_roundtrip_other() {
         let s1 = "abab".to_owned();
         let s2 = "ab ab".to_owned();
-        let (v, mut tokenizer, mut tpc) = init(&s1);
-        let (_, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+
+        // Train a tokenizer on s1
+        let (tokenizer,_) = BytePairEncodingTokenizer::from_corpus(&s1, 2);
+
+        // should only have 1 rule
+        assert_eq!(tokenizer.encoding_table.len(), 1);
+
+        // the rule should be (a,b) -> 256
+        assert_eq!(tokenizer.encoding_table[0], ((97, 98), 256));
+
+        // Roundtrips on s2
         let v2 = tokenizer.encode(&s2);
-        let num_bytes = s2.bytes().count();
-        let num_tokens = v2.len();
-        assert!(num_tokens < num_bytes);
+        // is the tokenization correct?
+        assert_eq!(v2, vec![256, 32, 256]);
+
+
         let s2_decoded = tokenizer.decode::<false>(&v2);
         assert_eq!(s2, s2_decoded);
+
+        // And did it actually compress? Fewer tokens than bytes?
+        assert!(v2.len() < s2.bytes().len());
     }
 
     #[test]
@@ -415,15 +443,8 @@ mod tests {
     /// as the TokenizedString that was returned in the training step
     #[test]
     fn test_tokenizer_on_corpus() {
-        let s = "Hade i morse möte med Emil. Se långlistan på  [[BSc Covariate Shift Emil Holmström]]# Status in various projects:
-
-[[Critical Stock Management]]
-Dave took a shot at writing. My turn! Should do this sunday!
-
-[[Pretrained PCA for ATE estimation]]
-- Work out how it behaves with high dimensional PCA asymptotically in pretraining. Should be straight forward and annoying
-- Remove the theorems not used".to_owned();
-        let (tokenizer, v) = BytePairEncodingTokenizer::from_corpus(&s, 100);
+        let s = "abab bcbc abc".to_owned();
+        let (tokenizer, v) = BytePairEncodingTokenizer::from_corpus(&s,1);
         let v2 = tokenizer.encode(&s);
         assert_eq!(v, v2);
     }
