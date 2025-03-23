@@ -11,15 +11,16 @@ pub struct BytePairEncodingTokenizer {
     encoding_table: Vec<((Token, Token), Token)>,
 }
 
+impl Default for BytePairEncodingTokenizer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BytePairEncodingTokenizer {
     pub fn new() -> Self {
-        // prepopulate the tokenizer with all the raw bytes
-        let mut forwards = vec![];
-        for i in 0..256 {
-            forwards.push(vec![i as u8]);
-        }
         Self {
-            decoding_table: forwards,
+            decoding_table: (0..=255).map(|b| vec![b as u8]).collect(),
             encoding_table: Vec::new(),
         }
     }
