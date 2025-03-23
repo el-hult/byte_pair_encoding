@@ -3,14 +3,14 @@ use std::{collections::HashMap, fs::read_to_string};
 type Token = u32; // must be smaller than usize, since I upcast from token to usize
 type TokenizedString = Vec<Token>;
 
-struct Tokenizer {
+struct BytePairEncodingTokenizer {
     /// mapping from a token to the byte sequence it represents
     decoding_table: Vec<Vec<u8>>,
     /// mapping from token pairs to tokens
     encoding_table: HashMap<(Token, Token), Token>,
 }
 
-impl Tokenizer {
+impl BytePairEncodingTokenizer {
     fn new() -> Self {
         // prepopulate the dictionary with all the raw bytes
         let mut forwards = vec![];
@@ -101,6 +101,66 @@ impl Tokenizer {
         }
         output_s
     }
+
+    /// Serialize the tokenizer into bytes that can be stored on disk
+    /// The format is:
+    ///  - number of tokens (u32)
+    ///    for each token:
+    ///    - length of the token (u32)
+    ///    - the token itself (bytes)
+    ///  - number of pairs (u32)
+    ///    for each pair:
+    ///    - the first token (u32)
+    ///    - the second token (u32)
+    ///    - the new token (u32)
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend(&(self.decoding_table.len() as u32).to_le_bytes());
+        for token in &self.decoding_table {
+            out.extend(&(token.len() as u32).to_le_bytes());
+            out.extend(token);
+        }
+        out.extend(&(self.encoding_table.len() as u32).to_le_bytes());
+        for ((fst, snd), new_tkn) in &self.encoding_table {
+            out.extend(&fst.to_le_bytes());
+            out.extend(&snd.to_le_bytes());
+            out.extend(&new_tkn.to_le_bytes());
+        }
+        out
+    }
+
+    /// Helper to read the next 4 bytes from an iterator and return a u32
+    fn take_u32_le(it: &mut std::slice::Iter<u8>) -> u32 {
+        let bytes: [u8; 4] = it.by_ref().take(4).cloned().collect::<Vec<_>>().try_into().unwrap();
+        u32::from_le_bytes(bytes)
+    }
+
+    /// Deserialize the tokenizer from bytes that were stored on disk
+    fn from_bytes(bs: &[u8]) -> Self {
+        let mut it = bs.iter();
+
+        let num_tokens = Self::take_u32_le(&mut it) as usize;
+        let mut decoding_table = Vec::with_capacity(num_tokens);
+        for _ in 0..num_tokens {
+            let token_len = Self::take_u32_le(&mut it) as usize;
+            let token = it.by_ref().take(token_len).cloned().collect();
+            decoding_table.push(token);
+        }
+
+        let num_pairs = Self::take_u32_le(&mut it) as usize;
+        let mut encoding_table = HashMap::with_capacity(num_pairs);
+        for _ in 0..num_pairs {
+            let fst = Self::take_u32_le(&mut it);
+            let snd = Self::take_u32_le(&mut it);
+            let new_tkn = Self::take_u32_le(&mut it);
+            encoding_table.insert((fst, snd), new_tkn);
+        }
+
+        Self {
+            decoding_table,
+            encoding_table,
+        }
+    }
 }
 
 struct TokenPairCounter {
@@ -150,7 +210,7 @@ impl TokenPairCounter {
 ///     tpc has the current pair count for the tkn_str
 fn prune_round<const DEBUG: bool>(
     tkn_str: &TokenizedString,
-    dict: &mut Tokenizer,
+    dict: &mut BytePairEncodingTokenizer,
     tpc: &mut TokenPairCounter,
 ) -> (TokenizedString, usize) {
     //eprintln!("prune_round");
@@ -227,7 +287,7 @@ fn prune_round<const DEBUG: bool>(
 fn main() {
     let s = read_to_string("input.txt").expect("file is there");
     let mut v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
-    let mut dict = Tokenizer::new();
+    let mut dict = BytePairEncodingTokenizer::new();
 
     // create new tokens until the usage count for new tokens is below 100
     let mut times_used = 99999;
@@ -247,9 +307,9 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn init(s: &str) -> (TokenizedString, Tokenizer, TokenPairCounter) {
+    fn init(s: &str) -> (TokenizedString, BytePairEncodingTokenizer, TokenPairCounter) {
         let v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
-        let dict = Tokenizer::new();
+        let dict = BytePairEncodingTokenizer::new();
         let tpc = TokenPairCounter::new(&v);
         (v, dict, tpc)
     }
@@ -314,5 +374,34 @@ mod tests {
         assert!(num_tokens < num_bytes);
         let s2_decoded = dict.decode::<false>(&v2);
         assert_eq!(s2, s2_decoded);
+    }
+
+    #[test]
+    fn test_to_bytes_and_from_bytes() {
+        let mut tokenizer = BytePairEncodingTokenizer::new();
+        tokenizer.add_pair_rule((0, 1));
+        tokenizer.add_pair_rule((2, 3));
+
+        let serialized = tokenizer.to_bytes();
+        let deserialized = BytePairEncodingTokenizer::from_bytes(&serialized);
+
+        // Check decoding table
+        assert_eq!(tokenizer.decoding_table, deserialized.decoding_table);
+
+        // Check encoding table
+        assert_eq!(tokenizer.encoding_table, deserialized.encoding_table);
+    }
+
+    #[test]
+    fn test_from_bytes_empty() {
+        let tokenizer = BytePairEncodingTokenizer::new();
+        let serialized = tokenizer.to_bytes();
+        let deserialized = BytePairEncodingTokenizer::from_bytes(&serialized);
+
+        // Check decoding table
+        assert_eq!(tokenizer.decoding_table, deserialized.decoding_table);
+
+        // Check encoding table
+        assert_eq!(tokenizer.encoding_table, deserialized.encoding_table);
     }
 }
