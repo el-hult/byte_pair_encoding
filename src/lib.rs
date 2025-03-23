@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
-
 type Token = u32; // must be smaller than usize, since I upcast from Token to usize
 type TokenizedString = Vec<Token>;
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct BytePairEncodingTokenizer {
     /// mapping from a token to the byte sequence it represents
     decoding_table: Vec<Vec<u8>>,
@@ -22,6 +22,10 @@ impl BytePairEncodingTokenizer {
             decoding_table: forwards,
             encoding_table: HashMap::new(),
         }
+    }
+
+    pub fn vocab_size(&self) -> usize {
+        self.decoding_table.len()
     }
 
     fn decode_token(&self, token: Token) -> &Vec<u8> {
@@ -192,9 +196,14 @@ impl TokenPairCounter {
         //eprintln!("+1 on {:?}",key);
         *self.map.entry(key).or_insert(0) += 1;
     }
-    // sort first by count, then by fst, then by snd
+    // sort first by count, then split ties by the first token, then by the second token
     fn get_most_common_pair(&self) -> Option<((Token, Token), usize)> {
-        self.map.iter().max_by_key(|(_, b)| *b).map(|(k, v)| {
+        self.map.iter().max_by_key(
+            |((fst, snd), count)| {
+                (*count, *fst, *snd)
+            },
+        )
+            .map(|(k, v)| {
             let fst = k.0;
             let snd = k.1;
             ((fst, snd), *v)
@@ -295,7 +304,13 @@ fn prune_round<const DEBUG: bool>(
 
 /// Helper to read the next 4 bytes from an iterator and return a u32
 fn take_u32_le(it: &mut std::slice::Iter<u8>) -> u32 {
-    let bytes: [u8; 4] = it.by_ref().take(4).cloned().collect::<Vec<_>>().try_into().unwrap();
+    let bytes: [u8; 4] = it
+        .by_ref()
+        .take(4)
+        .cloned()
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
     u32::from_le_bytes(bytes)
 }
 
@@ -399,5 +414,22 @@ mod tests {
 
         // Check encoding table
         assert_eq!(tokenizer.encoding_table, deserialized.encoding_table);
+    }
+
+    /// Applying a trained tokenizer to the corpus it was trained on produces the same TokenizedString
+    /// as the TokenizedString that was returned in the training step
+    #[test]
+    fn test_tokenizer_on_corpus() {
+        let s = "Hade i morse möte med Emil. Se långlistan på  [[BSc Covariate Shift Emil Holmström]]# Status in various projects:
+
+[[Critical Stock Management]]
+Dave took a shot at writing. My turn! Should do this sunday!
+
+[[Pretrained PCA for ATE estimation]]
+- Work out how it behaves with high dimensional PCA asymptotically in pretraining. Should be straight forward and annoying
+- Remove the theorems not used".to_owned();
+        let (tokenizer, v) = BytePairEncodingTokenizer::from_corpus(&s, 100);
+        let v2 = tokenizer.encode(&s);
+        assert_eq!(v, v2);
     }
 }
