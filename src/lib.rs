@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 
-pub type Token = u32; // must be smaller than usize, since I upcast from token to usize
+type Token = u32; // must be smaller than usize, since I upcast from Token to usize
 type TokenizedString = Vec<Token>;
 
 pub struct BytePairEncodingTokenizer {
@@ -158,7 +158,7 @@ impl BytePairEncodingTokenizer {
     }
 
     /// Create a tokenizer from a corpus, training it until the usage count for new tokens is below `min_usage_count`.
-    pub fn from_corpus(corpus: &str, min_usage_count: usize) -> Self {
+    pub fn from_corpus(corpus: &str, min_usage_count: usize) -> (Self, TokenizedString) {
         let mut v = corpus.bytes().map(|b| b.into()).collect::<Vec<Token>>();
         let mut tokenizer = BytePairEncodingTokenizer::new();
         let mut times_used = usize::MAX;
@@ -168,7 +168,7 @@ impl BytePairEncodingTokenizer {
             (v, times_used) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
         }
 
-        tokenizer
+        (tokenizer, v)
     }
 }
 

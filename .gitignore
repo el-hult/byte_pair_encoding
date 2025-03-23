@@ -2,3 +2,5 @@
 
 # test data
 input*
+# output data
+*.bpe
