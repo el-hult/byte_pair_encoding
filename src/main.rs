@@ -12,7 +12,7 @@ struct BytePairEncodingTokenizer {
 
 impl BytePairEncodingTokenizer {
     fn new() -> Self {
-        // prepopulate the dictionary with all the raw bytes
+        // prepopulate the tokenizer with all the raw bytes
         let mut forwards = vec![];
         for i in 0..256 {
             forwards.push(vec![i as u8]);
@@ -161,6 +161,20 @@ impl BytePairEncodingTokenizer {
             encoding_table,
         }
     }
+
+    /// Create a tokenizer from a corpus, training it until the usage count for new tokens is below `min_usage_count`.
+    fn from_corpus(corpus: &str, min_usage_count: usize) -> Self {
+        let mut v = corpus.bytes().map(|b| b.into()).collect::<Vec<Token>>();
+        let mut tokenizer = BytePairEncodingTokenizer::new();
+        let mut times_used = usize::MAX;
+        let mut tpc = TokenPairCounter::new(&v);
+
+        while times_used > min_usage_count {
+            (v, times_used) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        }
+
+        tokenizer
+    }
 }
 
 struct TokenPairCounter {
@@ -210,7 +224,7 @@ impl TokenPairCounter {
 ///     tpc has the current pair count for the tkn_str
 fn prune_round<const DEBUG: bool>(
     tkn_str: &TokenizedString,
-    dict: &mut BytePairEncodingTokenizer,
+    tokenizer: &mut BytePairEncodingTokenizer,
     tpc: &mut TokenPairCounter,
 ) -> (TokenizedString, usize) {
     //eprintln!("prune_round");
@@ -221,12 +235,12 @@ fn prune_round<const DEBUG: bool>(
 
     // okay, we have at least two tokens.
     // which token pair should we replace?
-    // finde out which token pair is most common.
-    // then add the most common one to the dictionary
+    // find out which token pair is most common.
+    // then add the most common one to the tokenizer
     let (max_pair, count) = tpc.get_most_common_pair().expect("no pairs found");
-    let new_token = dict.add_pair_rule(max_pair);
+    let new_token = tokenizer.add_pair_rule(max_pair);
     if DEBUG {
-        let decoded_token = dict.decode_token(new_token);
+        let decoded_token = tokenizer.decode_token(new_token);
         let decoded_token_as_string = std::str::from_utf8(decoded_token).unwrap_or("INVALID UTF8");
         println!("{} => {}", decoded_token_as_string, count);
     }
@@ -286,20 +300,14 @@ fn prune_round<const DEBUG: bool>(
 
 fn main() {
     let s = read_to_string("input.txt").expect("file is there");
-    let mut v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
-    let mut dict = BytePairEncodingTokenizer::new();
+    let tokenizer = BytePairEncodingTokenizer::from_corpus(&s, 100);
 
-    // create new tokens until the usage count for new tokens is below 100
-    let mut times_used = 99999;
-    let mut hm = TokenPairCounter::new(&v);
-    while times_used > 100 {
-        (v, times_used) = prune_round::<false>(&v, &mut dict, &mut hm);
-    }
-    let s2 = dict.decode::<true>(&v);
+    let v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
+    let s2 = tokenizer.decode::<true>(&v);
     println!("{}", s2);
 
-    let test_s = read_to_string("input2.txt").expect("Ddid not find second file");
-    let test_s2 = dict.decode::<true>(&dict.encode(&test_s));
+    let test_s = read_to_string("input2.txt").expect("Did not find second file");
+    let test_s2 = tokenizer.decode::<true>(&tokenizer.encode(&test_s));
     println!("{}", test_s2);
 }
 
@@ -309,39 +317,39 @@ mod tests {
 
     fn init(s: &str) -> (TokenizedString, BytePairEncodingTokenizer, TokenPairCounter) {
         let v = s.bytes().map(|b| b.into()).collect::<Vec<Token>>();
-        let dict = BytePairEncodingTokenizer::new();
+        let tokenizer = BytePairEncodingTokenizer::new();
         let tpc = TokenPairCounter::new(&v);
-        (v, dict, tpc)
+        (v, tokenizer, tpc)
     }
 
     #[test]
     fn process_not() {
         let s = "la la".to_owned();
-        let (v, dict, _) = init(&s);
-        let s2 = dict.decode::<false>(&v);
+        let (v, tokenizer, _) = init(&s);
+        let s2 = tokenizer.decode::<false>(&v);
         assert_eq!(s, s2)
     }
     #[test]
     fn process_once() {
         let s = "la la".to_owned();
-        let (mut v, mut dict, mut tpc) = init(&s);
-        (v, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
-        let s2 = dict.decode::<false>(&v);
+        let (mut v, mut tokenizer, mut tpc) = init(&s);
+        (v, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        let s2 = tokenizer.decode::<false>(&v);
         assert_eq!(s, s2)
     }
     #[test]
     fn process_twice() {
         let s = "la la".to_owned();
-        let (mut v, mut dict, mut tpc) = init(&s);
-        (v, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
-        (v, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
-        let s2 = dict.decode::<false>(&v);
+        let (mut v, mut tokenizer, mut tpc) = init(&s);
+        (v, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        (v, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        let s2 = tokenizer.decode::<false>(&v);
         assert_eq!(s, s2)
     }
 
     fn check_tpc_handling(s: String) {
-        let (v, mut dict, mut tpc) = init(&s);
-        let (v2, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
+        let (v, mut tokenizer, mut tpc) = init(&s);
+        let (v2, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
         let mut tpc2 = TokenPairCounter::new(&v2);
         tpc.map.retain(|_, v| *v > 0);
         tpc2.map.retain(|_, v| *v > 0);
@@ -366,13 +374,13 @@ mod tests {
     fn test_transfer() {
         let s1 = "abab".to_owned();
         let s2 = "ab ab".to_owned();
-        let (v, mut dict, mut tpc) = init(&s1);
-        let (_, _) = prune_round::<false>(&v, &mut dict, &mut tpc);
-        let v2 = dict.encode(&s2);
+        let (v, mut tokenizer, mut tpc) = init(&s1);
+        let (_, _) = prune_round::<false>(&v, &mut tokenizer, &mut tpc);
+        let v2 = tokenizer.encode(&s2);
         let num_bytes = s2.bytes().count();
         let num_tokens = v2.len();
         assert!(num_tokens < num_bytes);
-        let s2_decoded = dict.decode::<false>(&v2);
+        let s2_decoded = tokenizer.decode::<false>(&v2);
         assert_eq!(s2, s2_decoded);
     }
 
