@@ -4,3 +4,5 @@
 input*
 # output data
 *.bpe
+# profiling data
+flamegraph.svg
