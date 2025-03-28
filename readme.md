@@ -1,5 +1,23 @@
 A naive byte pair encoding implementation in rust.
 
+To test it out, run
+
+```bash
+git clone https://github.com/el-hult/byte_pair_encoding.git
+cd byte_pair_encoding
+echo "This is the text that the BPE will train on. We wish to have at least three 'is' so it becomes merged." > train.txt
+echo "This text file will be encoded using the trained BPE." > test.txt
+cargo run
+```
+
+This will 
+1. Train a BPE on `train.txt`. It generates tokens until the least used token is used less than 3 times. Report how many tokens there are in the trained BPE tokenizer.
+1. Encode and decode `train.txt` to the terminal with colorized token boundaries.
+1. Serialize the trained BPE to a file `bpe.bin`.
+1. Load the BPE from the file `bpe.bin`.
+1. Encode and decode `test.txt` to the terminal with colorized token boundaries.
+
+
 ### Insights from implementation
 Some things came to mind while implementing this. Imagine there are `m` byte-pair reduction rules, and a string to encode is `n` long.
 

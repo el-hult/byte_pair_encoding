@@ -3,11 +3,11 @@ use byte_pair_encoding::BytePairEncodingTokenizer;
 
 fn main() {
     // Train a BPE from the input.txt
-    let s = read_to_string("input.txt").expect("file is there");
-    let (tokenizer, encoded1) = BytePairEncodingTokenizer::from_corpus(&s, 10);
+    let s = read_to_string("train.txt").expect("file is there");
+    let (tokenizer, encoded1) = BytePairEncodingTokenizer::from_corpus(&s, 3);
     let s2 = tokenizer.decode::<true>(&encoded1);
     println!("{}", s2);
-    println!("There are {} tokens in the BPE", tokenizer.vocab_size());
+    println!("There are {} tokens in the BPE ({} tokens except the raw bytes)", tokenizer.vocab_size(), tokenizer.vocab_size()-256);
 
     // Write the BPE to a file
     let serialized = tokenizer.to_bytes();
@@ -26,7 +26,7 @@ fn main() {
     assert_eq!(encoded1, encoded2, "Re-encoded tokens do not match the original tokens");
 
     // Load a different file, and apply the BPE to it, printing the colorized output
-    let test_s = read_to_string("input2.txt").expect("Did not find second file");
+    let test_s = read_to_string("test.txt").expect("Did not find second file");
     let test_s2 = tokenizer.decode::<true>(&tokenizer.encode(&test_s));
     println!("{}", test_s2);
 }

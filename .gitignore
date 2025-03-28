@@ -1,7 +1,8 @@
 /target
 
 # test data
-input*
+train.txt
+test.txt
 # output data
 *.bpe
 # profiling data
