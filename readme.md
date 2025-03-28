@@ -13,8 +13,8 @@ cargo run
 This will 
 1. Train a BPE on `train.txt`. It generates tokens until the least used token is used less than 3 times. Report how many tokens there are in the trained BPE tokenizer.
 1. Encode and decode `train.txt` to the terminal with colorized token boundaries.
-1. Serialize the trained BPE to a file `bpe.bin`.
-1. Load the BPE from the file `bpe.bin`.
+1. Serialize the trained BPE to a file `tokenizer.bpe`.
+1. Load the BPE from the file `tokenizer.bpe`.
 1. Encode and decode `test.txt` to the terminal with colorized token boundaries.
 
 The code is separated into a library `lib.rs` that someone else could use as they like, and a simple `main.rs` that demonstrates how to use the library.
