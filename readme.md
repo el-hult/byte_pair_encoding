@@ -17,6 +17,7 @@ This will
 1. Load the BPE from the file `bpe.bin`.
 1. Encode and decode `test.txt` to the terminal with colorized token boundaries.
 
+The code is separated into a library `lib.rs` that someone else could use as they like, and a simple `main.rs` that demonstrates how to use the library.
 
 ### Insights from implementation
 Some things came to mind while implementing this. Imagine there are `m` byte-pair reduction rules, and a string to encode is `n` long.
