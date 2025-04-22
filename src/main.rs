@@ -5,7 +5,7 @@ fn main() {
     // Train a BPE from the input.txt
     let s = read_to_string("train.txt").expect("file is there");
     let (tokenizer, encoded1) = BytePairEncodingTokenizer::from_corpus(&s, 3);
-    let s2 = tokenizer.decode::<true>(&encoded1);
+    let s2 = tokenizer.decode_color(&encoded1);
     println!("{}", s2);
     println!("There are {} tokens in the BPE ({} tokens except the raw bytes)", tokenizer.vocab_size(), tokenizer.vocab_size()-256);
 
@@ -22,11 +22,10 @@ fn main() {
 
     // Apply the BPE to s again, and see it is the same as v
     let encoded2 = tokenizer2.encode(&s);
-    // HEISENBUG! This assert fails on my example input, and I don't know why (yet)
     assert_eq!(encoded1, encoded2, "Re-encoded tokens do not match the original tokens");
 
     // Load a different file, and apply the BPE to it, printing the colorized output
     let test_s = read_to_string("test.txt").expect("Did not find second file");
-    let test_s2 = tokenizer.decode::<true>(&tokenizer.encode(&test_s));
+    let test_s2 = tokenizer.decode_color(&tokenizer.encode(&test_s));
     println!("{}", test_s2);
 }

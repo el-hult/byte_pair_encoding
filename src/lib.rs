@@ -49,7 +49,7 @@ impl BytePairEncodingTokenizer {
     }
 
     /// Encode string into tokens
-    /// First cast to bytes, then iteratively use the encoding table to 
+    /// First cast to bytes, then iteratively use the encoding table to
     /// replace token pairs with new tokens
     pub fn encode(&self, v: &str) -> Vec<Token> {
         let mut v1 = v.bytes().map(|b| b.into()).collect::<Vec<Token>>();
@@ -73,7 +73,7 @@ impl BytePairEncodingTokenizer {
         v1
     }
 
-    pub fn decode<const COLOR: bool>(&self, v: &TokenizedString) -> String {
+    pub fn decode_color(&self, v: &TokenizedString) -> String {
         let mut output_s = String::new();
         const RESET: &str = "\x1b[0m";
         const YELLOW: &str = "\x1b[93m";
@@ -91,20 +91,24 @@ impl BytePairEncodingTokenizer {
                 );
                 decoded.extend(self.decode_token(*next_token));
                 maybe_str = std::str::from_utf8(&decoded);
-                if COLOR {
-                    curr_color = RED;
-                }
+                curr_color = RED;
             }
-            let str_to_add = maybe_str.unwrap();
-            if COLOR {
-                output_s.push_str(curr_color);
-                curr_color = if curr_color == RESET { YELLOW } else { RESET };
-            }
+            let str_to_add = maybe_str.expect("The the string must be valid utf8");
+            output_s.push_str(curr_color);
+            curr_color = if curr_color == RESET { YELLOW } else { RESET };
             output_s.push_str(str_to_add);
         }
-        if COLOR {
-            output_s.push_str(RESET);
+        output_s.push_str(RESET);
+        output_s
+    }
+
+    pub fn decode(&self, v: &TokenizedString) -> String {
+        let mut out_bytes = Vec::new();
+        for token in v {
+            let decoded = self.decode_token(*token);
+            out_bytes.extend(decoded);
         }
+        let output_s = String::from_utf8(out_bytes).expect("Could not decode tokens as valid utf8");
         output_s
     }
 
@@ -206,10 +210,10 @@ impl TokenPairCounter {
             },
         )
             .map(|(k, v)| {
-            let fst = k.0;
-            let snd = k.1;
-            ((fst, snd), *v)
-        })
+                let fst = k.0;
+                let snd = k.1;
+                ((fst, snd), *v)
+            })
     }
 
     /// PRECONDITION: the pair must be present
@@ -326,7 +330,7 @@ mod tests {
     fn process_not() {
         let s = "la la".to_owned();
         let (v, tokenizer, _) = init(&s);
-        let s2 = tokenizer.decode::<false>(&v);
+        let s2 = tokenizer.decode(&v);
         assert_eq!(s, s2)
     }
     #[test]
@@ -334,7 +338,7 @@ mod tests {
         let s = "la la".to_owned();
         let (mut v, mut tokenizer, mut tpc) = init(&s);
         (v, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
-        let s2 = tokenizer.decode::<false>(&v);
+        let s2 = tokenizer.decode(&v);
         assert_eq!(s, s2)
     }
     #[test]
@@ -343,7 +347,7 @@ mod tests {
         let (mut v, mut tokenizer, mut tpc) = init(&s);
         (v, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
         (v, _) = train_step::<false>(&v, &mut tokenizer, &mut tpc);
-        let s2 = tokenizer.decode::<false>(&v);
+        let s2 = tokenizer.decode(&v);
         assert_eq!(s, s2)
     }
 
@@ -369,19 +373,19 @@ mod tests {
         check_tpc_handling("ababc".to_owned());
     }
 
-        /// Can train a tokenizer on one string, and then round trip another string with compression
-        #[test]
-        fn test_troundtrip() {
-            let s1 = "abab".to_owned();
-    
-            // Train a tokenizer on s1
-            let (tokenizer,train_tokenized) = BytePairEncodingTokenizer::from_corpus(&s1, 2);
-            let train_roundtrip = tokenizer.decode::<false>(&train_tokenized);
-            assert_eq!(s1, train_roundtrip);
+    /// Can train a tokenizer on one string, and then round trip another string with compression
+    #[test]
+    fn test_troundtrip() {
+        let s1 = "abab".to_owned();
 
-            // Did it actually compress? Fewer tokens than bytes?
-            assert!(train_tokenized.len() < s1.bytes().len());
-        }
+        // Train a tokenizer on s1
+        let (tokenizer, train_tokenized) = BytePairEncodingTokenizer::from_corpus(&s1, 2);
+        let train_roundtrip = tokenizer.decode(&train_tokenized);
+        assert_eq!(s1, train_roundtrip);
+
+        // Did it actually compress? Fewer tokens than bytes?
+        assert!(train_tokenized.len() < s1.bytes().len());
+    }
 
     /// Can train a tokenizer on one string, and then round trip another string with compression
     #[test]
@@ -390,7 +394,7 @@ mod tests {
         let s2 = "ab ab".to_owned();
 
         // Train a tokenizer on s1
-        let (tokenizer,_) = BytePairEncodingTokenizer::from_corpus(&s1, 2);
+        let (tokenizer, _) = BytePairEncodingTokenizer::from_corpus(&s1, 2);
 
         // should only have 1 rule
         assert_eq!(tokenizer.encoding_table.len(), 1);
@@ -403,8 +407,7 @@ mod tests {
         // is the tokenization correct?
         assert_eq!(v2, vec![256, 32, 256]);
 
-
-        let s2_decoded = tokenizer.decode::<false>(&v2);
+        let s2_decoded = tokenizer.decode(&v2);
         assert_eq!(s2, s2_decoded);
 
         // And did it actually compress? Fewer tokens than bytes?
@@ -445,7 +448,7 @@ mod tests {
     #[test]
     fn test_tokenizer_on_corpus() {
         let s = "abab bcbc abc".to_owned();
-        let (tokenizer, v) = BytePairEncodingTokenizer::from_corpus(&s,1);
+        let (tokenizer, v) = BytePairEncodingTokenizer::from_corpus(&s, 1);
         let v2 = tokenizer.encode(&s);
         assert_eq!(v, v2);
     }
